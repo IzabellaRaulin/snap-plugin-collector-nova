@@ -329,3 +329,18 @@ func (self *collector) GetClusterConfig() map[string]interface{} {
 		"reserved_node_cores":    self.config.ReservedNCores,
 	}
 }
+
+//Measure API response time in nanoseconds
+func (self *collector) BenchmarkAPIResponse() (int64, error) {
+        client, err := self.NovaCache.Get(self.Auth, self.Auth.TenantName)
+        if err != nil {
+                return 0, err
+        }
+
+        apiRespTime, err := client.BenchmarkAPIResponse()
+        if err != nil {
+                return 0, err
+        }
+
+        return apiRespTime, nil
+}

@@ -33,6 +33,7 @@ type Nova interface {
 	GetLimits() (LimitsAbsolute, error)
 	GetQuotas() (QuotaSet, error)
 	GetHypervisorStatistics() (HypervisorStatistics, error)
+	BenchmarkAPIResponse() (int64, error)
 }
 
 type QuotaSet struct {

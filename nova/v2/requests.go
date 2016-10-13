@@ -21,7 +21,7 @@ package v2
 
 import (
 	"net/url"
-
+	"time"
 	"github.com/intelsdi-x/snap-plugin-collector-nova/nova"
 
 	"github.com/rackspace/gophercloud"
@@ -189,3 +189,17 @@ func (self *NovaV2) GetHypervisorStatistics() ([]nova.HypervisorStatistics, erro
 
 	return result, nil
 }
+
+//Measure API response time in nanoseconds
+func (self *NovaV2) BenchmarkAPIResponse() (int64, error) {
+        var out LimitsRespV2
+        start := time.Now()
+        err := nova.Get(self.Client, "", &out)
+        elapsed := time.Since(start)
+        if err != nil {
+                return 0, err
+        }
+
+        return elapsed.Nanoseconds(), nil
+}
+

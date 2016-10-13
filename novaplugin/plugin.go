@@ -31,6 +31,7 @@ import (
 	"reflect"
 
 	"github.com/intelsdi-x/snap-plugin-utilities/config"
+	"github.com/intelsdi-x/snap-plugin-utilities/str"
 	"github.com/intelsdi-x/snap/core"
 )
 
@@ -38,7 +39,7 @@ const (
 	// Name of plugin
 	Name = "nova-compute"
 	// Version of plugin
-	Version = 2
+	Version = 3
 	// Type of plugin
 	Type = plugin.CollectorPluginType
 )
@@ -139,21 +140,25 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 
 	results := make([]plugin.MetricType, len(mts))
 	for _, mt := range mts {
-		id, group, subgroup, _ := parseName(mt.Namespace().Strings())
-		if group == GROUP_CLUSTER {
-			cluster = true
-			continue
-		}
-		if group == GROUP_HYPERVISOR {
-			hypervisors = true
-		} else {
-			if subgroup == SUBGROUP_LIMITS {
-				limitsFor[id] = true
-			} else {
-				quotasFor[id] = true
-			}
-		}
-	}
+                if str.Contains(mt.Namespace().Strings(), "api_response_time") {
+                        continue
+                }
+                id, group, subgroup, _ := parseName(mt.Namespace().Strings())
+                if group == GROUP_CLUSTER {
+                        cluster = true
+                        continue
+                }
+
+                if group == GROUP_HYPERVISOR {
+                        hypervisors = true
+                } else {
+                        if subgroup == SUBGROUP_LIMITS {
+                                limitsFor[id] = true
+                        } else {
+                                quotasFor[id] = true
+                        }
+                }
+        }
 
 	cachedLimits := map[string]map[string]interface{}{}
 	for tenant, _ := range limitsFor {
@@ -196,28 +201,39 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 		cachedClusterConfig = self.collector.GetClusterConfig()
 	}
 
-	for i, mt := range mts {
-		id, group, subgroup, metric := parseName(mt.Namespace().Strings())
-		mt := plugin.MetricType{
-			Namespace_: mt.Namespace(),
-			Timestamp_: t,
-		}
-		if group == GROUP_CLUSTER && id == ID_CONFIG {
-			mt.Data_ = cachedClusterConfig[metric]
+        apiRespTime, err := self.collector.BenchmarkAPIResponse()
+        if err != nil {
+                return nil, fmt.Errorf("cannot get API response time: (%v)", err)
+        }
 
-		} else {
-			if group == GROUP_HYPERVISOR {
-				mt.Data_ = cachedHypervisor[id][metric]
-			} else {
-				if subgroup == SUBGROUP_LIMITS {
-					mt.Data_ = cachedLimits[id][metric]
-				} else {
-					mt.Data_ = cachedQuotas[id][metric]
-				}
-			}
-		}
-		results[i] = mt
-	}
+	for i, mt := range mts {
+                if str.Contains(mt.Namespace().Strings(), "api_response_time") {
+                        mt.Data_ = apiRespTime
+                        mt.Unit_ = "ns"
+                } else {
+                        id, group, subgroup, metric := parseName(mt.Namespace().Strings())
+                        mt = plugin.MetricType{
+                                Namespace_: mt.Namespace(),
+                                Timestamp_: t,
+                        }
+
+                        if group == GROUP_CLUSTER && id == ID_CONFIG {
+                                mt.Data_ = cachedClusterConfig[metric]
+
+                        } else {
+                                if group == GROUP_HYPERVISOR {
+                                        mt.Data_ = cachedHypervisor[id][metric]
+                                } else {
+                                        if subgroup == SUBGROUP_LIMITS {
+                                                mt.Data_ = cachedLimits[id][metric]
+                                        } else {
+                                                mt.Data_ = cachedQuotas[id][metric]
+                                        }
+                                }
+                        }
+                }
+                results[i] = mt
+        }
 
 	return results, nil
 }
@@ -268,6 +284,11 @@ func (self *NovaPlugin) GetMetricTypes(cfg plugin.ConfigType) ([]plugin.MetricTy
 	for i, v := range names {
 		mts[i].Namespace_ = core.NewNamespace(v...)
 	}
+
+        mts = append(mts, plugin.MetricType{
+                Namespace_: core.NewNamespace("intel", "openstack", "nova", "api_response_time"),
+                Config_:    cfg.ConfigDataNode,
+        })
 
 	return mts, nil
 }
@@ -371,6 +392,7 @@ type collectorInterface interface {
 	GetQuotas(tenant, id string) (map[string]interface{}, error)
 	GetHypervisors() (map[string]map[string]interface{}, error)
 	GetClusterConfig() map[string]interface{}
+	BenchmarkAPIResponse() (int64, error)
 }
 
 //for mocking
