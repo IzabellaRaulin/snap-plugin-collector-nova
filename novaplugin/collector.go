@@ -20,8 +20,10 @@ limitations under the License.
 package novaplugin
 
 import (
+	"net/http"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/rackspace/gophercloud"
 	"github.com/rackspace/gophercloud/openstack"
@@ -332,15 +334,12 @@ func (self *collector) GetClusterConfig() map[string]interface{} {
 
 //Measure API response time in nanoseconds
 func (self *collector) BenchmarkAPIResponse() (int64, error) {
-        client, err := self.NovaCache.Get(self.Auth, self.Auth.TenantName)
-        if err != nil {
+	start := time.Now()
+	_, err := http.Get("http://nova-api:8774/")
+        elapsed := time.Since(start)
+	if err != nil {
                 return 0, err
         }
 
-        apiRespTime, err := client.BenchmarkAPIResponse()
-        if err != nil {
-                return 0, err
-        }
-
-        return apiRespTime, nil
+        return elapsed.Nanoseconds(), nil
 }
