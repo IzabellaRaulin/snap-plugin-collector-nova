@@ -1,0 +1,22 @@
+{
+    "control": {
+        "plugins": {
+            "collector": {
+                "nova-compute": {
+                  "all": {
+                    "openstack_auth_url": "http://10.91.96.77:5000/v2.0/",
+                    "openstack_user": "admin",
+                    "openstack_pass": "secret",
+                    "openstack_tenant": "admin",
+                    "allocation_ratio_cores" : 1.5,
+                    "allocation_ratio_ram": 3,
+                    "reserved_node_cores" : 2,
+                    "reserved_node_ram_mb" : 2048
+                  }
+                }
+            },
+            "publisher": {},
+            "processor": {}
+        }
+    }
+}

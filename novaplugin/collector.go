@@ -49,7 +49,7 @@ func authNoTenant(auth gophercloud.AuthOptions) gophercloud.AuthOptions {
 }
 
 // Get performs lazy initalization of client for given tenant using given auth options.
-// If optional parameter givent its used as authenticated client
+// If optional parameter is given its used as authenticated client
 func (self CachedNovas) Get(auth gophercloud.AuthOptions, tenant string, providers ...*gophercloud.ProviderClient) (v2.NovaV2, error) {
 	cached, ok := self[tenant]
 	if ok {
@@ -203,8 +203,29 @@ func (self *collector) GetHStatsNames() []string {
 		"running_vms",
 		"vcpus",
 		"vcpus_used",
+		"memory_mb_overcommit",
+		"memory_mb_overcommit_withreserve",
+		"vcpus_overcommit",
+		"vcpus_overcommit_withreserve",
 	}
 }
+////	"current_workload":                 values.CurrentWorkload,
+//			"disk_available_least":             values.DiskAvailableLeast,
+//			"free_disk_gb":                     values.FreeDiskGB,
+//			"free_ram_mb":                      values.FreeRamMB,
+//			"hypervisor_version":               values.HypervisorVersion,
+//			"local_gb":                         values.LocalGB,
+//			"local_gb_used":                    values.LocalGBUsed,
+//			"memory_mb":                        values.MemoryMB,
+//			"memory_mb_used":                   values.MemoryMBUsed,
+//			"running_vms":                      values.RunningVMs,
+//			"vcpus":                            values.VCPUs,
+//			"vcpus_used":                       values.VCPUsUsed,
+//			"memory_mb_overcommit":             float64(values.MemoryMB) * self.config.RatioRam,
+//			"memory_mb_overcommit_withreserve": float64(values.MemoryMB)*self.config.RatioRam - self.config.ReservedNRam,
+//			"vcpus_overcommit":                 float64(values.VCPUs) * self.config.RatioCores,
+//			"vcpus_overcommit_withreserve":     float64(values.VCPUs)*self.config.RatioCores - self.config.ReservedNCores,
+////
 
 func (self *collector) GetClusterConfigNames() []string {
 	return []string{
@@ -259,7 +280,7 @@ func (self *collector) GetLimits(tenant string) (map[string]interface{}, error) 
 }
 
 // GetQuotas reads quotas. Besides tenant name it requires class id parameter
-// which is usuallt tenant id.
+// which is usually tenant id.
 func (self *collector) GetQuotas(tenant, id string) (map[string]interface{}, error) {
 	client, err := self.NovaCache.Get(self.Auth, tenant)
 	if err != nil {
@@ -332,7 +353,7 @@ func (self *collector) GetClusterConfig() map[string]interface{} {
 	}
 }
 
-//Measure API response time in nanoseconds
+// BenchmarkAPIResponse measures nova API response time in nanoseconds
 func (self *collector) BenchmarkAPIResponse() (int64, error) {
 	start := time.Now()
 	_, err := http.Get("http://nova-api:8774/")

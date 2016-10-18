@@ -20,18 +20,16 @@ limitations under the License.
 package novaplugin
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"reflect"
 	"time"
 
 	"github.com/intelsdi-x/snap/control/plugin"
 	"github.com/intelsdi-x/snap/control/plugin/cpolicy"
-
-	"reflect"
-
 	"github.com/intelsdi-x/snap-plugin-utilities/config"
-	"github.com/intelsdi-x/snap-plugin-utilities/str"
 	"github.com/intelsdi-x/snap/core"
 )
 
@@ -39,7 +37,7 @@ const (
 	// Name of plugin
 	Name = "nova-compute"
 	// Version of plugin
-	Version = 3
+	Version = 4
 	// Type of plugin
 	Type = plugin.CollectorPluginType
 )
@@ -57,7 +55,7 @@ type Config struct {
 }
 
 // ReadConfig deserializes plugin's configuration from metric or global config
-// given in cfg. out shoud be pointer to structure. If field of structure has no
+// given in cfg. out should be pointer to structure. If field of structure has no
 // tag it's name is used as config key, if it has named tag "c" with values
 // delimited by commas, first value is used as config key. If second value is
 // "weak" and field of structure is string, string representation of read value
@@ -116,49 +114,80 @@ type NovaPlugin struct {
 }
 
 // CollectMetrics returns filled mts table with metric values. Limits and quotas
-// are colllected once per tenant. All hypervisor related statistics are collected
+// are colllected once per tenant. All hypervisors related statistics are collected
 // in one call. This method also performs lazy initalization of plugin. Error
 // is returned if initalization or any of required call failed.
 func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.MetricType, error) {
-	if len(mts) > 0 {
-		err := self.init(mts[0])
-
-		if err != nil {
-			return nil, err
-		}
-
-	} else {
-		return mts, nil
+	if len(mts) == 0 {
+		// todo remove it, incoming mts cannot be empty - that's never happened
+		return nil, errors.New("Not found requested metrics")
 	}
 
-	t := time.Now()
+	if err := self.init(mts[0]); err != nil {
+		return nil, err
+	}
 
 	limitsFor := map[string]bool{}
 	quotasFor := map[string]bool{}
 	hypervisors := false
 	cluster := false
+	requestedTenantsForLimit := []string{}
+	requestedTenantsForQuota := []string{}
 
-	results := make([]plugin.MetricType, len(mts))
+	availableTenants, err := self.collector.GetTenants()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get tenants list: (%v)", err)
+	}
+
 	for _, mt := range mts {
-                if str.Contains(mt.Namespace().Strings(), "api_response_time") {
-                        continue
-                }
-                id, group, subgroup, _ := parseName(mt.Namespace().Strings())
-                if group == GROUP_CLUSTER {
-                        cluster = true
-                        continue
-                }
+		ns := mt.Namespace()
+		id, group, subgroup, _ := parseName(mt.Namespace().Strings())
+		switch group {
+		case GROUP_API:
+			// nothing to do here
+		case GROUP_CLUSTER:
+			cluster = true
+		case GROUP_HYPERVISOR:
+			hypervisors = true
+		case GROUP_TENANT:
+			switch subgroup {
+			case SUBGROUP_LIMITS:
+				requestedTenantsForLimit = append(requestedTenantsForLimit, id)
+			case SUBGROUP_QUOTAS:
+				requestedTenantsForQuota = append(requestedTenantsForQuota, id)
+			default:
+				return nil, fmt.Errorf("unrecognize metric %s, invalid tenants subgroup (incoming: %s, expected %s or %s)", ns.String(), subgroup, SUBGROUP_LIMITS, SUBGROUP_QUOTAS)
+			}
 
-                if group == GROUP_HYPERVISOR {
-                        hypervisors = true
-                } else {
-                        if subgroup == SUBGROUP_LIMITS {
-                                limitsFor[id] = true
-                        } else {
-                                quotasFor[id] = true
-                        }
-                }
+		default:
+			return nil, fmt.Errorf("unrecognize metric %s", ns.String())
+		}
         }
+	//todo optimize that
+	if contains(requestedTenantsForLimit, "*") {
+		// wildcard has been requested, so take all available tenants
+		for tenant := range availableTenants {
+			limitsFor[tenant] = true
+		}
+	} else {
+		for _, tenant := range requestedTenantsForLimit {
+			limitsFor[tenant] = true
+		}
+	}
+
+	if contains(requestedTenantsForQuota, "*") {
+		// wildcard has been requested, so take all available tenants
+		for tenant := range availableTenants {
+			quotasFor[tenant] = true
+		}
+	} else {
+		for _, tenant := range requestedTenantsForQuota {
+			quotasFor[tenant] = true
+		}
+	}
+
+	// set timestamp
+	t := time.Now()
 
 	cachedLimits := map[string]map[string]interface{}{}
 	for tenant, _ := range limitsFor {
@@ -201,38 +230,97 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 		cachedClusterConfig = self.collector.GetClusterConfig()
 	}
 
-        apiRespTime, err := self.collector.BenchmarkAPIResponse()
-        if err != nil {
-                return nil, fmt.Errorf("cannot get API response time: (%v)", err)
-        }
+	results := []plugin.MetricType{}
 
-	for i, mt := range mts {
-                if str.Contains(mt.Namespace().Strings(), "api_response_time") {
-                        mt.Data_ = apiRespTime
-                        mt.Unit_ = "ns"
-                } else {
-                        id, group, subgroup, metric := parseName(mt.Namespace().Strings())
-                        mt = plugin.MetricType{
-                                Namespace_: mt.Namespace(),
-                                Timestamp_: t,
-                        }
+	for _, mt := range mts {
+		mt.Version_ = Version
+		id, group, subgroup, metric := parseName(mt.Namespace().Strings())
 
-                        if group == GROUP_CLUSTER && id == ID_CONFIG {
-                                mt.Data_ = cachedClusterConfig[metric]
+		switch group {
+		case GROUP_API:
+			apiRespTime, err := self.collector.BenchmarkAPIResponse()
+			if err != nil {
+				return nil, fmt.Errorf("cannot get API response time: (%v)", err)
+			}
+			results = append(results, plugin.MetricType{
+				Namespace_: mt.Namespace(),
+				Data_: apiRespTime,
+				Timestamp_: time.Now(),
+				Unit_: "ns",
+				Version_: Version,
+			})
 
-                        } else {
-                                if group == GROUP_HYPERVISOR {
-                                        mt.Data_ = cachedHypervisor[id][metric]
-                                } else {
-                                        if subgroup == SUBGROUP_LIMITS {
-                                                mt.Data_ = cachedLimits[id][metric]
-                                        } else {
-                                                mt.Data_ = cachedQuotas[id][metric]
-                                        }
-                                }
-                        }
-                }
-                results[i] = mt
+		case GROUP_CLUSTER:
+			//todo iza czy sprawdzać, że id == ID_CONFIG
+			mt.Data_ = cachedClusterConfig[metric]
+			mt.Timestamp_ = t
+			results = append(results, mt)
+
+		case GROUP_HYPERVISOR:
+			if id == "*" {
+				// retrieve this metric for all available hypervisors
+				for hypervisorID := range cachedHypervisor{
+					ns := make([]core.NamespaceElement, len(mt.Namespace()))
+					copy(ns, mt.Namespace())
+					//todo add checking lenght
+					ns[len(namespacePrefix)+1].Value = hypervisorID
+
+					results = append(results, plugin.MetricType{
+						Timestamp_: t,
+						Namespace_: ns,
+						Data_: cachedHypervisor[hypervisorID][metric],
+						Description_: mt.Description(),
+						Version_: Version,
+						Tags_: mt.Tags(),
+					})
+				}
+			} else {
+				mt.Data_ = cachedHypervisor[id][metric]
+				mt.Timestamp_ = t
+				results = append(results, mt)
+			}
+
+		case GROUP_TENANT:
+			cachedData := map[string]map[string]interface{}{}
+
+			//based on requested subgroup, get an appropriate cachedData
+			switch subgroup {
+			case SUBGROUP_LIMITS:
+				cachedData = cachedLimits
+
+			case SUBGROUP_QUOTAS:
+				cachedData = cachedQuotas
+			default:
+				return nil, fmt.Errorf("unrecognize metric %s, invalid tenants subgroup (incoming: %s, expected %s or %s)", mt.Namespace().String(), subgroup, SUBGROUP_LIMITS, SUBGROUP_QUOTAS)
+			}
+
+			if id == "*" {
+				// retrieve this metric for all available tenants, use appropriate cached data
+				for tenantID := range cachedData {
+					ns := make([]core.NamespaceElement, len(mt.Namespace()))
+					copy(ns, mt.Namespace())
+					//todo iza change it
+					ns[len(namespacePrefix)+1].Value = tenantID
+					mt.Namespace_ = ns
+					mt.Data_ = cachedData[tenantID][metric]
+					results = append(results, plugin.MetricType{
+						Timestamp_: t,
+						Namespace_: ns,
+						Data_: cachedData[tenantID][metric],
+						Description_: mt.Description(),
+						Version_: Version,
+						Tags_: mt.Tags(),
+					})
+				}
+			} else {
+				mt.Data_ = cachedData[id][metric]
+				mt.Timestamp_ = t
+				results = append(results, mt)
+			}
+
+		default:
+			return nil, fmt.Errorf("unrecognize metric %s", mt.Namespace().String())
+		}
         }
 
 	return results, nil
@@ -249,46 +337,48 @@ func (self *NovaPlugin) GetMetricTypes(cfg plugin.ConfigType) ([]plugin.MetricTy
 		return nil, err
 	}
 
-	names := [][]string{}
-
-	tenants, err := self.collector.GetTenants()
-
-	if err != nil {
-		return nil, fmt.Errorf("cannot get tenants list: (%v)", err)
-	}
+	metricNames := []core.Namespace{}
 
 	limitNames := self.collector.GetLimitsNames()
 	quotaNames := self.collector.GetQuotasNames()
 	configNames := self.collector.GetClusterConfigNames()
+	hipervisorStatsNames := self.collector.GetHStatsNames()
 
-	appendNames(&names, ID_CONFIG, GROUP_CLUSTER, "", configNames)
-
-	for tName, _ := range tenants {
-		appendNames(&names, tName, GROUP_TENANT, SUBGROUP_LIMITS, limitNames)
-		appendNames(&names, tName, GROUP_TENANT, SUBGROUP_QUOTAS, quotaNames)
+	// create namespaces of tenants' metrics
+	for _, limitName := range limitNames {
+		name := core.NewNamespace(namespacePrefix...).AddStaticElement(GROUP_TENANT).AddDynamicElement("tenant_name", "a name of tenant").
+		AddStaticElement(SUBGROUP_LIMITS).AddStaticElement(limitName)
+		metricNames = append(metricNames, name)
 	}
 
-	hypervisors, err := self.collector.GetHypervisors()
-
-	if err != nil {
-		return nil, fmt.Errorf("cannot get hypervisors list: (%v)", err)
+	for _, quotaName := range quotaNames {
+		name := core.NewNamespace(namespacePrefix...).AddStaticElement(GROUP_TENANT).AddDynamicElement("tenant_name", "a name of tenant").
+		AddStaticElement(SUBGROUP_QUOTAS).AddStaticElement(quotaName)
+		metricNames = append(metricNames, name)
 	}
 
-	for hName, hVals := range hypervisors {
-		for key, _ := range hVals {
-			names = append(names, makeName(hName, GROUP_HYPERVISOR, "", key))
-		}
+
+	for _, configName := range configNames {
+		name := core.NewNamespace(namespacePrefix...).AddStaticElements(GROUP_CLUSTER, ID_CONFIG, configName)
+		metricNames = append(metricNames, name)
 	}
 
-	mts := make([]plugin.MetricType, len(names))
-	for i, v := range names {
-		mts[i].Namespace_ = core.NewNamespace(v...)
+
+	// create namespaces of hypervisors' metrics
+	for _, hStatsName := range hipervisorStatsNames {
+		name := core.NewNamespace(namespacePrefix...).AddStaticElement(GROUP_HYPERVISOR).
+			AddDynamicElement("hypervisor_id", "an id of hipervisor").AddStaticElement(hStatsName)
+		metricNames = append(metricNames, name)
 	}
 
-        mts = append(mts, plugin.MetricType{
-                Namespace_: core.NewNamespace("intel", "openstack", "nova", "api_response_time"),
-                Config_:    cfg.ConfigDataNode,
-        })
+	// create namespaces of metric NOVA-API response time
+	apiResponse := core.NewNamespace(namespacePrefix...).AddStaticElements(GROUP_API, "response_time")
+	metricNames = append(metricNames, apiResponse)
+
+	mts := make([]plugin.MetricType, len(metricNames))
+	for i, v := range metricNames {
+		mts[i].Namespace_ = v
+	}
 
 	return mts, nil
 }
@@ -343,6 +433,7 @@ const (
 	GROUP_HYPERVISOR = "hypervisor"
 	GROUP_TENANT     = "tenant"
 	GROUP_CLUSTER    = "cluster"
+	GROUP_API   	 = "api"
 
 	ID_CONFIG = "config"
 )
@@ -365,6 +456,15 @@ func appendNames(out *[][]string, id, group, subgroup string, metrics []string) 
 	for _, m := range metrics {
 		*out = append(*out, makeName(id, group, subgroup, m))
 	}
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 func parseName(ns []string) (id, group, subgroup, metric string) {
