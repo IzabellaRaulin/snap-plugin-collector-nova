@@ -20,8 +20,8 @@ limitations under the License.
 package novaplugin
 
 import (
-	"net/http"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -31,6 +31,7 @@ import (
 	"github.com/rackspace/gophercloud/pagination"
 
 	"github.com/intelsdi-x/snap-plugin-collector-nova/nova/v2"
+	"os"
 )
 
 // CachedNovas holds authenticated nova clients for given tenants
@@ -196,6 +197,7 @@ func (self *collector) GetHStatsNames() []string {
 		"disk_available_least",
 		"free_disk_gb",
 		"free_ram_mb",
+		"hypervisor_version",
 		"local_gb",
 		"local_gb_used",
 		"memory_mb",
@@ -209,23 +211,6 @@ func (self *collector) GetHStatsNames() []string {
 		"vcpus_overcommit_withreserve",
 	}
 }
-////	"current_workload":                 values.CurrentWorkload,
-//			"disk_available_least":             values.DiskAvailableLeast,
-//			"free_disk_gb":                     values.FreeDiskGB,
-//			"free_ram_mb":                      values.FreeRamMB,
-//			"hypervisor_version":               values.HypervisorVersion,
-//			"local_gb":                         values.LocalGB,
-//			"local_gb_used":                    values.LocalGBUsed,
-//			"memory_mb":                        values.MemoryMB,
-//			"memory_mb_used":                   values.MemoryMBUsed,
-//			"running_vms":                      values.RunningVMs,
-//			"vcpus":                            values.VCPUs,
-//			"vcpus_used":                       values.VCPUsUsed,
-//			"memory_mb_overcommit":             float64(values.MemoryMB) * self.config.RatioRam,
-//			"memory_mb_overcommit_withreserve": float64(values.MemoryMB)*self.config.RatioRam - self.config.ReservedNRam,
-//			"vcpus_overcommit":                 float64(values.VCPUs) * self.config.RatioCores,
-//			"vcpus_overcommit_withreserve":     float64(values.VCPUs)*self.config.RatioCores - self.config.ReservedNCores,
-////
 
 func (self *collector) GetClusterConfigNames() []string {
 	return []string{
@@ -341,6 +326,29 @@ func (self *collector) GetHypervisors() (map[string]map[string]interface{}, erro
 		}
 	}
 
+	// calculate aggregated statistics for hypervisors statistics: `vcpus_used` and `running_vms`
+	var all_vcpus_used int
+	var all_running_vms int
+
+	for _, stats := range result {
+		if val, ok := stats["vcpus_used"].(int); ok {
+			all_vcpus_used += val
+		} else {
+			fmt.Fprintf(os.Stderr, "Cannot aggregate `vcpus_used` statitics")
+		}
+
+		if val, ok := stats["running_vms"].(int); ok {
+			all_running_vms += val
+		} else {
+			fmt.Fprintf(os.Stderr, "Cannot aggregate `running_vms` statitics")
+		}
+	}
+
+	result["all"] = map[string]interface{}{
+		"vcpus_used":  all_vcpus_used,
+		"running_vms": all_running_vms,
+	}
+
 	return result, nil
 }
 
@@ -357,10 +365,10 @@ func (self *collector) GetClusterConfig() map[string]interface{} {
 func (self *collector) BenchmarkAPIResponse() (int64, error) {
 	start := time.Now()
 	_, err := http.Get("http://nova-api:8774/")
-        elapsed := time.Since(start)
+	elapsed := time.Since(start)
 	if err != nil {
-                return 0, err
-        }
+		return 0, err
+	}
 
-        return elapsed.Nanoseconds(), nil
+	return elapsed.Nanoseconds(), nil
 }

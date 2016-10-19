@@ -22,14 +22,14 @@ package novaplugin
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
-	"reflect"
 	"time"
 
+	"github.com/intelsdi-x/snap-plugin-utilities/config"
 	"github.com/intelsdi-x/snap/control/plugin"
 	"github.com/intelsdi-x/snap/control/plugin/cpolicy"
-	"github.com/intelsdi-x/snap-plugin-utilities/config"
 	"github.com/intelsdi-x/snap/core"
 )
 
@@ -162,7 +162,7 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 		default:
 			return nil, fmt.Errorf("unrecognize metric %s", ns.String())
 		}
-        }
+	}
 	//todo optimize that
 	if contains(requestedTenantsForLimit, "*") {
 		// wildcard has been requested, so take all available tenants
@@ -244,10 +244,10 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 			}
 			results = append(results, plugin.MetricType{
 				Namespace_: mt.Namespace(),
-				Data_: apiRespTime,
+				Data_:      apiRespTime,
 				Timestamp_: time.Now(),
-				Unit_: "ns",
-				Version_: Version,
+				Unit_:      "ns",
+				Version_:   Version,
 			})
 
 		case GROUP_CLUSTER:
@@ -259,19 +259,26 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 		case GROUP_HYPERVISOR:
 			if id == "*" {
 				// retrieve this metric for all available hypervisors
-				for hypervisorID := range cachedHypervisor{
+				for hypervisorID := range cachedHypervisor {
+					data, ok := cachedHypervisor[hypervisorID][metric]
+					if !ok {
+						// skip this metric if it not available for the following hypervisorID
+						// e.g. hypervisorID == "all" holds only two aggregated stats: vpus_used and running_vms
+						continue
+					}
+
 					ns := make([]core.NamespaceElement, len(mt.Namespace()))
 					copy(ns, mt.Namespace())
 					//todo add checking lenght
 					ns[len(namespacePrefix)+1].Value = hypervisorID
 
 					results = append(results, plugin.MetricType{
-						Timestamp_: t,
-						Namespace_: ns,
-						Data_: cachedHypervisor[hypervisorID][metric],
+						Timestamp_:   t,
+						Namespace_:   ns,
+						Data_:        data,
 						Description_: mt.Description(),
-						Version_: Version,
-						Tags_: mt.Tags(),
+						Version_:     Version,
+						Tags_:        mt.Tags(),
 					})
 				}
 			} else {
@@ -304,12 +311,12 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 					mt.Namespace_ = ns
 					mt.Data_ = cachedData[tenantID][metric]
 					results = append(results, plugin.MetricType{
-						Timestamp_: t,
-						Namespace_: ns,
-						Data_: cachedData[tenantID][metric],
+						Timestamp_:   t,
+						Namespace_:   ns,
+						Data_:        cachedData[tenantID][metric],
 						Description_: mt.Description(),
-						Version_: Version,
-						Tags_: mt.Tags(),
+						Version_:     Version,
+						Tags_:        mt.Tags(),
 					})
 				}
 			} else {
@@ -321,7 +328,7 @@ func (self *NovaPlugin) CollectMetrics(mts []plugin.MetricType) ([]plugin.Metric
 		default:
 			return nil, fmt.Errorf("unrecognize metric %s", mt.Namespace().String())
 		}
-        }
+	}
 
 	return results, nil
 }
@@ -347,22 +354,20 @@ func (self *NovaPlugin) GetMetricTypes(cfg plugin.ConfigType) ([]plugin.MetricTy
 	// create namespaces of tenants' metrics
 	for _, limitName := range limitNames {
 		name := core.NewNamespace(namespacePrefix...).AddStaticElement(GROUP_TENANT).AddDynamicElement("tenant_name", "a name of tenant").
-		AddStaticElement(SUBGROUP_LIMITS).AddStaticElement(limitName)
+			AddStaticElement(SUBGROUP_LIMITS).AddStaticElement(limitName)
 		metricNames = append(metricNames, name)
 	}
 
 	for _, quotaName := range quotaNames {
 		name := core.NewNamespace(namespacePrefix...).AddStaticElement(GROUP_TENANT).AddDynamicElement("tenant_name", "a name of tenant").
-		AddStaticElement(SUBGROUP_QUOTAS).AddStaticElement(quotaName)
+			AddStaticElement(SUBGROUP_QUOTAS).AddStaticElement(quotaName)
 		metricNames = append(metricNames, name)
 	}
-
 
 	for _, configName := range configNames {
 		name := core.NewNamespace(namespacePrefix...).AddStaticElements(GROUP_CLUSTER, ID_CONFIG, configName)
 		metricNames = append(metricNames, name)
 	}
-
 
 	// create namespaces of hypervisors' metrics
 	for _, hStatsName := range hipervisorStatsNames {
@@ -433,7 +438,7 @@ const (
 	GROUP_HYPERVISOR = "hypervisor"
 	GROUP_TENANT     = "tenant"
 	GROUP_CLUSTER    = "cluster"
-	GROUP_API   	 = "api"
+	GROUP_API        = "api"
 
 	ID_CONFIG = "config"
 )
