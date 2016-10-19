@@ -48,6 +48,7 @@ type QuotaSet struct {
 
 type HypervisorStatistics struct {
 	Id                 int
+	Hostname 	 string
 	CurrentWorkload    int
 	DiskAvailableLeast int
 	FreeDiskGB         int

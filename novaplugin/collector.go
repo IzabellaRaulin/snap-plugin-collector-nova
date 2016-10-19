@@ -22,7 +22,6 @@ package novaplugin
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/rackspace/gophercloud"
@@ -306,7 +305,7 @@ func (self *collector) GetHypervisors() (map[string]map[string]interface{}, erro
 	result := map[string]map[string]interface{}{}
 
 	for _, values := range list {
-		result[strconv.Itoa(values.Id)] = map[string]interface{}{
+		result[values.Hostname] = map[string]interface{}{
 			"current_workload":                 values.CurrentWorkload,
 			"disk_available_least":             values.DiskAvailableLeast,
 			"free_disk_gb":                     values.FreeDiskGB,

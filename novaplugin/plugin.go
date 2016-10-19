@@ -372,7 +372,7 @@ func (self *NovaPlugin) GetMetricTypes(cfg plugin.ConfigType) ([]plugin.MetricTy
 	// create namespaces of hypervisors' metrics
 	for _, hStatsName := range hipervisorStatsNames {
 		name := core.NewNamespace(namespacePrefix...).AddStaticElement(GROUP_HYPERVISOR).
-			AddDynamicElement("hypervisor_id", "an id of hipervisor").AddStaticElement(hStatsName)
+			AddDynamicElement("hypervisor_hostname", "a hostname of hipervisor").AddStaticElement(hStatsName)
 		metricNames = append(metricNames, name)
 	}
 

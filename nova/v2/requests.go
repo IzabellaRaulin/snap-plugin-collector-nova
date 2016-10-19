@@ -111,6 +111,7 @@ func (self *QuotaSetRespV2) ToQuotaSet() nova.QuotaSet {
 
 type HypervisorInnerRespV2 struct {
 	Id                 int `mapstructure:"id"`
+	Hostname           string `mapstructure:"hypervisor_hostname"`
 	CurrentWorkload    int `mapstructure:"current_workload"`
 	DiskAvailableLeast int `mapstructure:"disk_available_least"`
 	FreeDiskGB         int `mapstructure:"free_disk_gb"`
@@ -133,6 +134,7 @@ type HypervisorRespV2 struct {
 func (self *HypervisorInnerRespV2) ToHypervisorStatistics() nova.HypervisorStatistics {
 	return nova.HypervisorStatistics{
 		Id:                 self.Id,
+		Hostname:           self.Hostname,
 		CurrentWorkload:    self.CurrentWorkload,
 		DiskAvailableLeast: self.DiskAvailableLeast,
 		FreeDiskGB:         self.FreeDiskGB,
